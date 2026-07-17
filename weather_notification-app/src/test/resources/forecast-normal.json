@@ -1,0 +1,11 @@
+{
+  "coord": {"lon": 2.35, "lat": 48.86},
+  "weather": [{"id": 800, "main": "Clear", "description": "clear sky", "icon": "wind_40x40"}],
+  "base": "stations",
+  "main": {"temp": 293.55, "feels_like": 292.94, "temp_min": 293.15, "temp_max": 294.26, "pressure": 1020, "humidity": 45},
+  "wind": {"speed": 3.6, "deg": 180},
+  "clouds": {"all": 10},
+  "visibility": 10000,
+  "name": "Paris",
+  "cod": 200
+}

@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: weather-notification
+
+  # JPA / PostgreSQL
+  datasource:
+    url: jdbc:postgresql://localhost:5432/weatherdb
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  # Artemis / JMS
+  artemis:
+    mode: native
+    broker-url: tcp://localhost:61616
+    user: admin
+    password: admin
+    listeners:
+      auto-create-queue: true
+
+# OpenWeatherMap API
+weather:
+  api:
+    base-url: https://api.openweathermap.org/data/2.5/weather
+    api-key: ${OPENWEATHER_API_KEY:dummy-key}
+
+server:
+  port: 9090
