@@ -1,91 +1,64 @@
 package com.example.weather;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.activemq.ArtemisContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import javax.imageio.ImageIO;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.net.Socket;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
+import com.example.weather.entity.WeatherRequest;
+import com.example.weather.repository.WeatherRequestRepository;
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.util.ReflectionTestUtils.setField;
+import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(
-        properties = {
-                "spring.artemis.broker-url=tcp://localhost:61616",
-                "spring.artemis.user=admin",
-                "spring.artemis.password=admin",
-                "spring.artemis.mode=native",
-                "spring.artemis.listeners.auto-create-queue=true",
-                "weather.api.base-url=https://api.openweathermap.org/data/2.5/weather",
-                "weather.api.api-key=dummy-key"
-        }
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
 )
 class NotificationFlowIT extends AbstractIntegrationTest {
 
-    private static final GenericContainer<?> artemisContainer = new GenericContainer<>(
-            DockerImageName.parse("apache/activemq-artemis:latest-alpine"))
-            .withExposedPorts(61616, 8161)
-            .withEnv("ARTEMIS_USER", "admin")
-            .withEnv("ARTEMIS_PASSWORD", "admin")
-            .withLogConsumer(outputFrame -> {
-                String log = outputFrame.getUtf8String();
-                if (log.contains("AMQ211002") || log.contains("localhost:61616")) {
-                    System.out.println("Artemis: " + log.trim());
-                }
-            })
-            .withReuse(false);
-
-    @Autowired
-    private WeatherService weatherService;
 
     @Autowired
     private NotificationService notificationService;
 
+    @Autowired
+    private WeatherRequestRepository weatherRequestRepository;
+
+
+    protected static final ArtemisContainer artemis = new ArtemisContainer(
+            DockerImageName.parse("apache/activemq-artemis:latest-alpine"))
+            .withEnv("ANONYMOUS_LOGIN", "true")
+            .withReuse(false) ;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void startArtemis() {
+        artemis.start();
+    }
+
     @DynamicPropertySource
-    static void registerProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", () -> "jdbc:postgresql://"
-                + postgresContainer.getHost()
-                + ":" + postgresContainer.getMappedPort(5432)
-                + "/" + postgresContainer.getDatabaseName());
-        registry.add("spring.datasource.username", () -> postgresContainer.getUsername());
-        registry.add("spring.datasource.password", () -> postgresContainer.getPassword());
-        registry.add("spring.artemis.broker-url", () -> "tcp://localhost:" + artemisContainer.getMappedPort(61616));
-        registry.add("weather.api.base-url", () -> "http://localhost:" + getWireMockPort() + "/data/2.5/weather");
-        registry.add("weather.api.api-key", () -> "test-api-key");
+    static void registerArtemisProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.artemis.broker-url", () -> "tcp://" + artemis.getHost() + ":" + artemis.getMappedPort(61616));
+        registry.add("spring.artemis.authentication-enabled", () -> "false");
+        registry.add("spring.artemis.use-jms-auth-enabled", () -> "false");
     }
 
-    @BeforeAll
-    static void startContainers() {
-        wireMockServer = new WireMockServer(0);
-        wireMockServer.start();
-        artemisContainer.start();
+    @org.junit.jupiter.api.AfterAll
+    static void stopArtemis() {
+        artemis.stop();
     }
 
-    private static int getWireMockPort() {
-        return wireMockServer.port();
-    }
 
-    @AfterAll
-    static void stopContainers() {
-        artemisContainer.stop();
-        if (wireMockServer != null && wireMockServer.isRunning()) {
-            wireMockServer.stop();
-        }
-    }
-
-    @Test
+@Test
     void testNotificationFlow_severeWeather() throws Exception {
         // Given: A weather forecast with severe weather
         ClassPathResource forecastResource = new ClassPathResource("forecast-severe.json");
@@ -111,26 +84,21 @@ class NotificationFlowIT extends AbstractIntegrationTest {
         wireMockServer.stubFor(get(urlPathMatching("/weather/forecast"))
                 .willReturn(okJson(forecastJson)));
 
-        setField(weatherService, "forecastUrl",
-                wireMockServer.baseUrl() + "/weather/forecast");
-        setField(weatherService, "iconUrl",
-                wireMockServer.baseUrl() + "/weather/icon");
-
         // When: Sending a request that triggers severe weather notification
         notificationService.processWeatherRequest("London", LocalDate.of(2024, 7, 15));
 
-        // Wait for processing
-        Thread.sleep(3000);
+        // Then: The notification should be triggered (await async processing)
+        await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    java.util.List<WeatherRequest> savedRequests = weatherRequestRepository
+                            .findByCityNameAndRequestedDateOrderByCreatedAtDesc("London", LocalDate.of(2024, 7, 15));
+                    WeatherRequest savedRequest = savedRequests.isEmpty()
+                            ? throwAssertionError("WeatherRequest not found")
+                            : savedRequests.get(0);
 
-        // Then: The notification should be triggered
-        java.util.List<WeatherRequest> savedRequests = weatherRequestRepository
-                .findByCityNameAndRequestedDate("London", LocalDate.of(2024, 7, 15));
-        WeatherRequest savedRequest = savedRequests.isEmpty()
-                ? throwAssertionError("WeatherRequest not found")
-                : savedRequests.get(0);
-
-        assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
-        assertThat(savedRequest.getResponsePayload()).contains("\"main\": \"severe\"");
+                    assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
+                    assertThat(savedRequest.getResponsePayload()).contains("\"severity\":\"severe\"");
+                });
     }
 
     @Test
@@ -159,29 +127,33 @@ class NotificationFlowIT extends AbstractIntegrationTest {
         wireMockServer.stubFor(get(urlPathMatching("/weather/forecast"))
                 .willReturn(okJson(forecastJson)));
 
-        setField(weatherService, "forecastUrl",
-                wireMockServer.baseUrl() + "/weather/forecast");
-        setField(weatherService, "iconUrl",
-                wireMockServer.baseUrl() + "/weather/icon");
-
         // When: Sending a request that does NOT trigger severe weather
         notificationService.processWeatherRequest("Paris", LocalDate.of(2024, 7, 15));
 
-        // Wait for processing
-        Thread.sleep(3000);
+        // Then: The notification should NOT be triggered (await async processing)
+        await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    java.util.List<WeatherRequest> savedRequests = weatherRequestRepository
+                            .findByCityNameAndRequestedDateOrderByCreatedAtDesc("Paris", LocalDate.of(2024, 7, 15));
+                    WeatherRequest savedRequest = savedRequests.isEmpty()
+                            ? throwAssertionError("WeatherRequest not found")
+                            : savedRequests.get(0);
 
-        // Then: The notification should NOT be triggered
-        java.util.List<WeatherRequest> savedRequests = weatherRequestRepository
-                .findByCityNameAndRequestedDate("Paris", LocalDate.of(2024, 7, 15));
-        WeatherRequest savedRequest = savedRequests.isEmpty()
-                ? throwAssertionError("WeatherRequest not found")
-                : savedRequests.get(0);
-
-        assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
-        assertThat(savedRequest.getResponsePayload()).doesNotContain("\"severity\":\"severe\"");
+                    assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
+                    assertThat(savedRequest.getResponsePayload()).doesNotContain("\"severity\":\"severe\"");
+                });
     }
 
     private WeatherRequest throwAssertionError(String message) {
         throw new AssertionError(message);
+    }
+
+    private static void waitForArtemisReady(int port, int maxSeconds) {
+        await().atMost(Duration.ofSeconds(maxSeconds)).pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> {
+                    try (Socket socket = new Socket("localhost", port)) {
+                        // Connection successful, Artemis is ready
+                    }
+                });
     }
 }

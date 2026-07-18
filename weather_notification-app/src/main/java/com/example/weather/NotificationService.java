@@ -1,5 +1,6 @@
 package com.example.weather;
 
+import com.example.weather.service.WeatherService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jms.core.JmsTemplate;
@@ -7,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class NotificationService {
@@ -39,48 +39,59 @@ public class NotificationService {
         }
     }
 
-    private boolean isSevereWeather(org.springframework.http.ResponseEntity<Map<String, Object>> response) {
-        if (response == null || response.getBody() == null) {
+    private boolean isSevereWeather(String response) {
+        if (response == null || response.isEmpty()) {
             return false;
         }
 
-        Map<String, Object> body = response.getBody();
-        Object weatherArray = body.get("weather");
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Map<String, Object> body = objectMapper.readValue(response, Map.class);
 
-        if (weatherArray instanceof java.util.List<?> weatherList) {
-            for (Object weather : weatherList) {
-                if (weather instanceof Map<?, ?> weatherMap) {
-                    Object main = weatherMap.get("main");
-                    if (main != null && "severe".equalsIgnoreCase(main.toString())) {
-                        return true;
+            Object weatherArray = body.get("weather");
+            if (weatherArray instanceof java.util.List<?> weatherList) {
+                for (Object weather : weatherList) {
+                    if (weather instanceof Map<?, ?> weatherMap) {
+                        Object main = weatherMap.get("main");
+                        if (main != null && "severe".equalsIgnoreCase(main.toString())) {
+                            return true;
+                        }
                     }
                 }
             }
+        } catch (Exception e) {
+            log.error("Error parsing weather response", e);
         }
         return false;
     }
 
-    private String buildNotificationMessage(String cityName, org.springframework.http.ResponseEntity<Map<String, Object>> response) {
-        if (response == null || response.getBody() == null) {
+    private String buildNotificationMessage(String cityName, String response) {
+        if (response == null || response.isEmpty()) {
             return String.format("city: %s, status: no data", cityName);
         }
 
-        Map<String, Object> body = response.getBody();
-        StringBuilder message = new StringBuilder();
-        message.append("city: ").append(cityName);
-        message.append(", date: ").append(LocalDate.now());
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Map<String, Object> body = objectMapper.readValue(response, Map.class);
 
-        Object weatherArray = body.get("weather");
-        if (weatherArray instanceof java.util.List<?> weatherList && !weatherList.isEmpty()) {
-            Object firstWeather = weatherList.get(0);
-            if (firstWeather instanceof Map<?, ?> weatherMap) {
-                Object main = weatherMap.get("main");
-                if (main != null) {
-                    message.append(", severity: ").append(main);
+            StringBuilder message = new StringBuilder();
+            message.append("city: ").append(cityName);
+            message.append(", date: ").append(LocalDate.now());
+
+            Object weatherArray = body.get("weather");
+            if (weatherArray instanceof java.util.List<?> weatherList && !weatherList.isEmpty()) {
+                Object firstWeather = weatherList.get(0);
+                if (firstWeather instanceof Map<?, ?> weatherMap) {
+                    Object main = weatherMap.get("main");
+                    if (main != null) {
+                        message.append(", severity: ").append(main);
+                    }
                 }
             }
+            return message.toString();
+        } catch (Exception e) {
+            log.error("Error parsing weather response for notification", e);
+            return String.format("city: %s, status: error parsing data", cityName);
         }
-
-        return message.toString();
     }
 }

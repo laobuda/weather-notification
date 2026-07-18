@@ -6,9 +6,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,45 +18,37 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.TimeUnit;
 
+import com.example.weather.entity.WeatherRequest;
+import com.example.weather.repository.WeatherRequestRepository;
+
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-                "spring.artemis.broker-url=tcp://localhost:61616",
-                "spring.artemis.user=admin",
-                "spring.artemis.password=admin",
-                "spring.artemis.mode=native",
-                "spring.artemis.listeners.auto-create-queue=true",
-                "weather.api.base-url=http://localhost:8089/data/2.5/weather"
-        }
+        properties = "spring.artemis.embedded.enabled=false"
 )
 public class WeatherApiFlowIT extends AbstractIntegrationTest {
 
     @LocalServerPort
     private int port;
 
-    private static WireMockServer wireMockServer;
-
     private static final HttpClient httpClient = HttpClient.newHttpClient();
+
+    @Autowired
+    private WeatherRequestRepository weatherRequestRepository;
 
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", () -> "jdbc:postgresql://"
-                + postgresContainer.getHost()
-                + ":" + postgresContainer.getMappedPort(5432)
-                + "/" + postgresContainer.getDatabaseName());
-        registry.add("spring.datasource.username", () -> postgresContainer.getUsername());
-        registry.add("spring.datasource.password", () -> postgresContainer.getPassword());
+        registry.add("weather.api.forecast-url", () -> "http://localhost:" + wireMockServer.port() + "/weather/forecast");
     }
 
     @org.junit.jupiter.api.BeforeAll
     static void startWireMock() {
-        wireMockServer = new WireMockServer(8089);
+        wireMockServer = new WireMockServer(0);
         wireMockServer.start();
-        WireMock.configureFor("localhost", 8089);
+        WireMock.configureFor("localhost", wireMockServer.port());
     }
 
     @AfterEach
@@ -85,6 +79,23 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody(mockResponse)));
 
+        String mockForecastResponse = """
+                {
+                    "city_name": "London",
+                    "list": [{
+                        "datetime": "2024-07-15",
+                        "temp": 293.15,
+                        "humidity": 60,
+                        "weather": [{"description": "clear sky"}]
+                    }]
+                }
+                """;
+        WireMock.stubFor(get(urlPathEqualTo("/weather/forecast"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(mockForecastResponse)));
+
         // Call the REST endpoint via HTTP
         String baseUrl = "http://localhost:" + port;
         String url = baseUrl + "/api/weather/London/2024-07-15";
@@ -101,7 +112,7 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
 
         // Verify the WeatherRequest was persisted with status=SUCCESS
         await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> {
-            var requests = weatherRequestRepository.findByCityName("London");
+            var requests = weatherRequestRepository.findByCityNameOrderByCreatedAtDesc("London");
             assertNotNull(requests);
             assertTrue(requests.size() > 0, "Expected at least one WeatherRequest to be persisted");
 
@@ -122,6 +133,13 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"message\": \"City not found\"}")));
 
+        // Also stub forecast endpoint to return 404
+        WireMock.stubFor(get(urlPathEqualTo("/weather/forecast"))
+                .willReturn(aResponse()
+                        .withStatus(404)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"message\": \"Forecast not found\"}")));
+
         String baseUrl = "http://localhost:" + port;
         String url = baseUrl + "/api/weather/NonExistentCity/2024-07-15";
 
@@ -141,7 +159,7 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                 // Network error is also acceptable
             }
 
-            var requests = weatherRequestRepository.findByCityName("NonExistentCity");
+            var requests = weatherRequestRepository.findByCityNameOrderByCreatedAtDesc("NonExistentCity");
             assertNotNull(requests);
             assertTrue(requests.size() > 0, "Expected a WeatherRequest to be persisted even for errors");
 

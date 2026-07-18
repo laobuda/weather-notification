@@ -1,6 +1,7 @@
 package com.example.weather.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -15,7 +16,7 @@ public class WeatherRequest {
     private String cityName;
 
     @Column(nullable = false)
-    private String requestedDate;
+    private LocalDate requestedDate;
 
     @Column(columnDefinition = "TEXT")
     private String requestPayload;
@@ -39,8 +40,8 @@ public class WeatherRequest {
     public void setId(Long id) { this.id = id; }
     public String getCityName() { return cityName; }
     public void setCityName(String cityName) { this.cityName = cityName; }
-    public String getRequestedDate() { return requestedDate; }
-    public void setRequestedDate(String requestedDate) { this.requestedDate = requestedDate; }
+    public LocalDate getRequestedDate() { return requestedDate; }
+    public void setRequestedDate(LocalDate requestedDate) { this.requestedDate = requestedDate; }
     public String getRequestPayload() { return requestPayload; }
     public void setRequestPayload(String requestPayload) { this.requestPayload = requestPayload; }
     public String getResponsePayload() { return responsePayload; }
