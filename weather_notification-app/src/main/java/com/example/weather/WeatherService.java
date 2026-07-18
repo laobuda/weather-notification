@@ -5,15 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
+import com.example.weather.client.OpenWeatherApiClient;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-
-@Service
+import org.springframework.stereotype.Service;
 public class WeatherService {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherService.class);
@@ -47,7 +46,15 @@ public class WeatherService {
         }
 
         // Fetch from OpenWeather API
-        String responsePayload = openWeatherApiClient.fetchWeather(cityName);
+        String responsePayload;
+        try {
+            responsePayload = openWeatherApiClient.fetchWeather(cityName, date.toString());
+        } catch (Exception e) {
+            log.error("Error fetching weather from API", e);
+            responsePayload = null;
+        }
+
+        // Save to database
 
         // Save to database
         WeatherRequest weatherRequest = new WeatherRequest();
