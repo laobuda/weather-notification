@@ -9,10 +9,13 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+
 @Service
 public class NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final WeatherService weatherService;
     private final JmsTemplate jmsTemplate;
@@ -31,7 +34,7 @@ public class NotificationService {
         // Step 2: Check if weather is severe
         if (isSevereWeather(response)) {
             // Step 3: Send notification to JMS queue
-            String message = buildNotificationMessage(cityName, response);
+            String message = buildNotificationMessage(cityName, date, response);
             log.info("Severe weather detected for city: {}. Sending notification.", cityName);
             jmsTemplate.convertAndSend("weather.queue", message);
         } else {
@@ -45,8 +48,9 @@ public class NotificationService {
         }
 
         try {
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            Map<String, Object> body = objectMapper.readValue(response, Map.class);
+            Map<String, Object> body = MAPPER.readValue(
+                    response,
+                    new TypeReference<Map<String, Object>>() {});
 
             Object weatherArray = body.get("weather");
             if (weatherArray instanceof java.util.List<?> weatherList) {
@@ -65,33 +69,33 @@ public class NotificationService {
         return false;
     }
 
-    private String buildNotificationMessage(String cityName, String response) {
-        if (response == null || response.isEmpty()) {
-            return String.format("city: %s, status: no data", cityName);
-        }
-
+    private String buildNotificationMessage(String cityName, LocalDate date, String response) {
         try {
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            Map<String, Object> body = objectMapper.readValue(response, Map.class);
+            Map<String, Object> body = (response != null && !response.isEmpty())
+                    ? MAPPER.readValue(response, new TypeReference<Map<String, Object>>() {})
+                    : Map.of();
 
-            StringBuilder message = new StringBuilder();
-            message.append("city: ").append(cityName);
-            message.append(", date: ").append(LocalDate.now());
-
+            String severity = null;
             Object weatherArray = body.get("weather");
             if (weatherArray instanceof java.util.List<?> weatherList && !weatherList.isEmpty()) {
                 Object firstWeather = weatherList.get(0);
                 if (firstWeather instanceof Map<?, ?> weatherMap) {
-                    Object main = weatherMap.get("main");
-                    if (main != null) {
-                        message.append(", severity: ").append(main);
-                    }
+                    severity = (String) weatherMap.get("main");
                 }
             }
-            return message.toString();
+
+            return buildJsonMessage(cityName, date, severity);
         } catch (Exception e) {
             log.error("Error parsing weather response for notification", e);
-            return String.format("city: %s, status: error parsing data", cityName);
+            return buildJsonMessage(cityName, date, "error");
         }
+    }
+
+    private String buildJsonMessage(String cityName, LocalDate date, String severity) {
+        return MAPPER.createObjectNode()
+                .put("city", cityName)
+                .put("date", date.toString())
+                .put("severity", severity)
+                .toString();
     }
 }

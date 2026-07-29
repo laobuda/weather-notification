@@ -3,6 +3,7 @@ package com.example.weather.client;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
@@ -17,7 +18,9 @@ public class OpenWeatherApiClient {
     }
 
     public String fetchWeather(String cityName, String date) throws Exception {
-        URL url = new URL(baseUrl + "?q=" + cityName + "&appid=" + apiKey);
+        String query = "q=" + java.net.URLEncoder.encode(cityName, StandardCharsets.UTF_8)
+                + "&appid=" + apiKey;
+        URL url = URI.create(baseUrl + "?" + query).toURL();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         try {
             connection.setRequestMethod("GET");
@@ -36,6 +39,12 @@ public class OpenWeatherApiClient {
             } else if (responseCode == 404) {
                 return null;
             } else {
+                // Consume error stream to prevent connection leak
+                try (var errorStream = connection.getErrorStream()) {
+                    if (errorStream != null) {
+                        errorStream.transferTo(java.io.OutputStream.nullOutputStream());
+                    }
+                }
                 throw new RuntimeException("HTTP error code: " + responseCode);
             }
         } finally {
@@ -63,6 +72,12 @@ public class OpenWeatherApiClient {
             } else if (responseCode == 404) {
                 return null;
             } else {
+                // Consume error stream to prevent connection leak
+                try (var errorStream = connection.getErrorStream()) {
+                    if (errorStream != null) {
+                        errorStream.transferTo(java.io.OutputStream.nullOutputStream());
+                    }
+                }
                 throw new RuntimeException("HTTP error code: " + responseCode);
             }
         } finally {

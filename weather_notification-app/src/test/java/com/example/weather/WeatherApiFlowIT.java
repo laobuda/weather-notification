@@ -1,16 +1,11 @@
 package com.example.weather;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
-import com.github.tomakehurst.wiremock.client.WireMock;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,36 +21,21 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.artemis.embedded.enabled=false"
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
 )
 public class WeatherApiFlowIT extends AbstractIntegrationTest {
 
     @LocalServerPort
     private int port;
 
-    private static final HttpClient httpClient = HttpClient.newHttpClient();
-
     @Autowired
     private WeatherRequestRepository weatherRequestRepository;
 
-    @DynamicPropertySource
-    static void registerProperties(DynamicPropertyRegistry registry) {
-        registry.add("weather.api.forecast-url", () -> "http://localhost:" + wireMockServer.port() + "/weather/forecast");
-    }
+    private HttpClient httpClient;
 
-    @org.junit.jupiter.api.BeforeAll
-    static void startWireMock() {
-        wireMockServer = new WireMockServer(0);
-        wireMockServer.start();
-        WireMock.configureFor("localhost", wireMockServer.port());
-    }
-
-    @AfterEach
-    void resetWireMock() {
-        if (wireMockServer != null) {
-            wireMockServer.resetAll();
-        }
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        httpClient = HttpClient.newHttpClient();
     }
 
     @Test
@@ -72,8 +52,8 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                 }
                 """;
 
-        WireMock.stubFor(get(urlPathEqualTo("/data/2.5/weather"))
-                .withQueryParam("q", WireMock.equalTo("London"))
+        getWireMockServer().stubFor(get(urlPathEqualTo("/data/2.5/weather"))
+                .withQueryParam("q", equalTo("London"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
@@ -90,7 +70,7 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                     }]
                 }
                 """;
-        WireMock.stubFor(get(urlPathEqualTo("/weather/forecast"))
+        getWireMockServer().stubFor(get(urlPathEqualTo("/weather/forecast"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
@@ -127,14 +107,14 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
     @Test
     void testWeatherApiErrorHandling() {
         // Configure WireMock to return 404 (city not found)
-        WireMock.stubFor(get(urlPathEqualTo("/data/2.5/weather"))
+        getWireMockServer().stubFor(get(urlPathEqualTo("/data/2.5/weather"))
                 .willReturn(aResponse()
                         .withStatus(404)
                         .withHeader("Content-Type", "application/json")
                         .withBody("{\"message\": \"City not found\"}")));
 
         // Also stub forecast endpoint to return 404
-        WireMock.stubFor(get(urlPathEqualTo("/weather/forecast"))
+        getWireMockServer().stubFor(get(urlPathEqualTo("/weather/forecast"))
                 .willReturn(aResponse()
                         .withStatus(404)
                         .withHeader("Content-Type", "application/json")
@@ -149,24 +129,27 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
                     .GET()
                     .build();
 
-            try {
-                HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-                // 404 from OpenWeather should result in a 500 from our API (since we treat it as an error)
-                // or the endpoint should handle it gracefully
-                assertTrue(response.statusCode() == 200 || response.statusCode() == 500,
-                        "Expected 200 or 500, got " + response.statusCode());
-            } catch (Exception e) {
-                // Network error is also acceptable
-            }
-
-            var requests = weatherRequestRepository.findByCityNameOrderByCreatedAtDesc("NonExistentCity");
-            assertNotNull(requests);
-            assertTrue(requests.size() > 0, "Expected a WeatherRequest to be persisted even for errors");
-
-            WeatherRequest request = requests.get(0);
-            assertEquals("NonExistentCity", request.getCityName());
-            assertTrue(request.getStatus() == WeatherRequest.Status.NOT_FOUND
-                    || request.getStatus() == WeatherRequest.Status.ERROR);
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            // 404 from OpenWeather should result in a 500 from our API (since we treat it as an error)
+            // or the endpoint should handle it gracefully
+            assertTrue(response.statusCode() == 200 || response.statusCode() == 500,
+                    "Expected 200 or 500, got " + response.statusCode());
         });
+
+        var requests = weatherRequestRepository.findByCityNameOrderByCreatedAtDesc("NonExistentCity");
+        assertNotNull(requests);
+        assertTrue(requests.size() > 0, "Expected a WeatherRequest to be persisted even for errors");
+
+        WeatherRequest request = requests.get(0);
+        assertEquals("NonExistentCity", request.getCityName());
+        assertTrue(request.getStatus() == WeatherRequest.Status.NOT_FOUND
+                || request.getStatus() == WeatherRequest.Status.ERROR);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (httpClient != null) {
+            httpClient.close();
+        }
     }
 }

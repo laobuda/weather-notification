@@ -4,17 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.activemq.ArtemisContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import javax.imageio.ImageIO;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
-import java.net.Socket;
 
 import com.example.weather.entity.WeatherRequest;
 import com.example.weather.repository.WeatherRequestRepository;
@@ -27,38 +22,13 @@ import static org.awaitility.Awaitility.await;
 )
 class NotificationFlowIT extends AbstractIntegrationTest {
 
-
     @Autowired
     private NotificationService notificationService;
 
     @Autowired
     private WeatherRequestRepository weatherRequestRepository;
 
-
-    protected static final ArtemisContainer artemis = new ArtemisContainer(
-            DockerImageName.parse("apache/activemq-artemis:latest-alpine"))
-            .withEnv("ANONYMOUS_LOGIN", "true")
-            .withReuse(false) ;
-
-    @org.junit.jupiter.api.BeforeAll
-    static void startArtemis() {
-        artemis.start();
-    }
-
-    @DynamicPropertySource
-    static void registerArtemisProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.artemis.broker-url", () -> "tcp://" + artemis.getHost() + ":" + artemis.getMappedPort(61616));
-        registry.add("spring.artemis.authentication-enabled", () -> "false");
-        registry.add("spring.artemis.use-jms-auth-enabled", () -> "false");
-    }
-
-    @org.junit.jupiter.api.AfterAll
-    static void stopArtemis() {
-        artemis.stop();
-    }
-
-
-@Test
+    @Test
     void testNotificationFlow_severeWeather() throws Exception {
         // Given: A weather forecast with severe weather
         ClassPathResource forecastResource = new ClassPathResource("forecast-severe.json");
@@ -97,7 +67,7 @@ class NotificationFlowIT extends AbstractIntegrationTest {
                             : savedRequests.get(0);
 
                     assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
-                    assertThat(savedRequest.getResponsePayload()).contains("\"severity\":\"severe\"");
+                    assertThat(savedRequest.getResponsePayload()).contains("\"main\":\"severe\"");
                 });
     }
 
@@ -140,20 +110,11 @@ class NotificationFlowIT extends AbstractIntegrationTest {
                             : savedRequests.get(0);
 
                     assertThat(savedRequest.getStatus()).isEqualTo(WeatherRequest.Status.SUCCESS);
-                    assertThat(savedRequest.getResponsePayload()).doesNotContain("\"severity\":\"severe\"");
+                    assertThat(savedRequest.getResponsePayload()).doesNotContain("\"main\":\"severe\"");
                 });
     }
 
     private WeatherRequest throwAssertionError(String message) {
         throw new AssertionError(message);
-    }
-
-    private static void waitForArtemisReady(int port, int maxSeconds) {
-        await().atMost(Duration.ofSeconds(maxSeconds)).pollInterval(Duration.ofMillis(100))
-                .untilAsserted(() -> {
-                    try (Socket socket = new Socket("localhost", port)) {
-                        // Connection successful, Artemis is ready
-                    }
-                });
     }
 }

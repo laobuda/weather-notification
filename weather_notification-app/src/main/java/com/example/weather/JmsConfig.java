@@ -16,10 +16,10 @@ public class JmsConfig {
     @Value("${spring.artemis.broker-url:tcp://localhost:61616}")
     private String brokerUrl;
 
-    @Value("${spring.artemis.user:admin}")
+    @Value("${spring.artemis.user:artemis}")
     private String user;
 
-    @Value("${spring.artemis.password:admin}")
+    @Value("${spring.artemis.password:artemis}")
     private String password;
 
     @Bean

@@ -2,6 +2,8 @@ package com.example.weather.consumer;
 
 import com.example.weather.entity.WeatherRequest;
 import com.example.weather.repository.WeatherRequestRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.jms.Message;
 import jakarta.jms.TextMessage;
 import org.slf4j.Logger;
@@ -16,6 +18,7 @@ import java.util.List;
 public class NotificationConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationConsumer.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final WeatherRequestRepository repository;
 
@@ -34,15 +37,24 @@ public class NotificationConsumer {
 
         log.info("Received message from weather.queue: {}", textMessage);
 
-        // Parse city and date from the JMS message, then update the existing WeatherRequest
-        // (created synchronously by NotificationService) instead of creating a new one.
-        String cityName = parseCityName(textMessage);
-        String dateStr = parseDateFromMessage(textMessage);
+        // Parse the JSON message using Jackson JsonNode instead of fragile string parsing
+        String cityName = "unknown";
+        String dateStr;
+        try {
+            JsonNode json = MAPPER.readTree(textMessage);
+            cityName = json.path("city").asText("unknown");
+            dateStr = json.path("date").asText("");
+        } catch (Exception e) {
+            log.error("Failed to parse notification message as JSON: {}", textMessage, e);
+            return;
+        }
 
         try {
+            LocalDate parsedDate = (dateStr == null || dateStr.isEmpty())
+                    ? LocalDate.now()
+                    : LocalDate.parse(dateStr);
             List<WeatherRequest> existingRequests = repository
-                    .findByCityNameAndRequestedDateOrderByCreatedAtDesc(
-                            cityName, dateStr != null ? LocalDate.parse(dateStr) : LocalDate.now());
+                    .findByCityNameAndRequestedDateOrderByCreatedAtDesc(cityName, parsedDate);
 
             if (!existingRequests.isEmpty()) {
                 WeatherRequest existing = existingRequests.get(0);
@@ -55,35 +67,5 @@ public class NotificationConsumer {
         } catch (Exception e) {
             log.error("Error processing message from weather.queue for city: {}", cityName, e);
         }
-    }
-
-    private String parseCityName(String message) {
-        if (message != null && message.contains("city:")) {
-            int start = message.indexOf("city:") + 5;
-            int end = message.indexOf(",", start);
-            if (end == -1) {
-                end = message.length();
-            }
-            return message.substring(start, end).trim();
-        }
-        return message != null ? message.trim() : "unknown";
-    }
-
-    private String parseDateFromMessage(String message) {
-        if (message != null && message.contains("date:")) {
-            int dateStart = message.indexOf("date:") + 5;
-            int dateEnd = message.indexOf(",", dateStart);
-            if (dateEnd == -1) {
-                dateEnd = message.length();
-            }
-            String datePart = message.substring(dateStart, dateEnd).trim();
-            // Extract just the date portion (YYYY-MM-DD) from "date: 2024-07-18, severity: ..."
-            int commaIdx = datePart.indexOf(',');
-            if (commaIdx > 0) {
-                datePart = datePart.substring(0, commaIdx).trim();
-            }
-            return datePart;
-        }
-        return null;
     }
 }

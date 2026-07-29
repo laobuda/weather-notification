@@ -5,22 +5,28 @@ import com.example.weather.entity.WeatherRequest;
 import com.example.weather.repository.WeatherRequestRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 @Service
 public class WeatherService {
+
+    private static final Logger log = LoggerFactory.getLogger(WeatherService.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final OpenWeatherApiClient apiClient;
     private final WeatherRequestRepository repository;
     private final String forecastUrl;
 
     public WeatherService(OpenWeatherApiClient apiClient, WeatherRequestRepository repository,
-                          String forecastUrl) {
+                          @org.springframework.beans.factory.annotation.Qualifier("forecastUrl") String forecastUrl) {
         this.apiClient = apiClient;
         this.repository = repository;
         this.forecastUrl = forecastUrl;
@@ -32,7 +38,10 @@ public class WeatherService {
         WeatherRequest request = new WeatherRequest();
         request.setCityName(cityName);
         request.setRequestedDate(date);
-        request.setRequestPayload("{\"cityName\":\"" + cityName + "\", \"date\":\"" + dateStr + "\"}");
+        request.setRequestPayload(MAPPER.createObjectNode()
+                .put("cityName", cityName)
+                .put("date", dateStr)
+                .toString());
         request.setCreatedAt(LocalDateTime.now());
 
         try {
@@ -42,8 +51,12 @@ public class WeatherService {
                 // Merge forecast data if forecastUrl is set
                 if (forecastUrl != null) {
                     String forecastJson = apiClient.fetchForecast(forecastUrl);
-                    String merged = mergeWeatherResponses(response, forecastJson);
-                    request.setResponsePayload(merged);
+                    if (forecastJson != null) {
+                        String merged = mergeWeatherResponses(response, forecastJson);
+                        request.setResponsePayload(merged);
+                    } else {
+                        request.setResponsePayload(response);
+                    }
                 } else {
                     request.setResponsePayload(response);
                 }
@@ -52,7 +65,10 @@ public class WeatherService {
                 request.setStatus(WeatherRequest.Status.NOT_FOUND);
             }
         } catch (Exception e) {
-            request.setResponsePayload(e.getMessage());
+            log.error("Failed to fetch weather for city: {}, date: {}", cityName, date, e);
+            request.setResponsePayload(MAPPER.createObjectNode()
+                    .put("error", e.getMessage())
+                    .toString());
             request.setStatus(WeatherRequest.Status.ERROR);
         }
 
@@ -62,7 +78,14 @@ public class WeatherService {
 
     @Transactional
     public String getWeather(String cityName, String date) {
-        return getWeatherByCityAndDate(cityName, LocalDate.parse(date));
+        try {
+            return getWeatherByCityAndDate(cityName, LocalDate.parse(date));
+        } catch (DateTimeParseException e) {
+            log.warn("Invalid date format for city: {}, date: {}", cityName, date, e);
+            return MAPPER.createObjectNode()
+                    .put("error", "Invalid date format. Expected: yyyy-MM-dd")
+                    .toString();
+        }
     }
 
     @Transactional
@@ -70,39 +93,42 @@ public class WeatherService {
         // Parse city and date from the JMS message
         String cityName = parseCityName(message);
         String dateStr = parseDateFromMessage(message);
-        LocalDate date = dateStr != null ? LocalDate.parse(dateStr) : LocalDate.now();
+        LocalDate date;
+        try {
+            date = dateStr != null ? LocalDate.parse(dateStr) : LocalDate.now();
+        } catch (DateTimeParseException e) {
+            log.warn("Invalid date in JMS message for city: {}, date: {}. Defaulting to today.", cityName, dateStr, e);
+            date = LocalDate.now();
+        }
 
         getWeatherByCityAndDate(cityName, date);
     }
 
     private String parseCityName(String message) {
-        if (message != null && message.contains("\"city\"")) {
-            int cityStart = message.indexOf("\"city\"") + 8;
-            int cityEnd = message.indexOf("\"", cityStart + 1);
-            if (cityEnd > cityStart) {
-                return message.substring(cityStart + 1, cityEnd);
-            }
+        if (message == null || message.isBlank()) {
+            return "unknown";
         }
-        if (message != null && message.contains("city:")) {
-            int start = message.indexOf("city:") + 5;
-            int end = message.indexOf(" ", start);
-            if (end == -1) {
-                end = message.length();
-            }
-            return message.substring(start, end).trim();
+        try {
+            JsonNode json = MAPPER.readTree(message);
+            return json.path("city").asText("unknown");
+        } catch (Exception e) {
+            log.warn("Failed to parse city from message as JSON: {}. Returning 'unknown'.", message, e);
+            return "unknown";
         }
-        return message != null ? message.trim() : "unknown";
     }
 
     private String parseDateFromMessage(String message) {
-        if (message != null && message.contains("\"date\"")) {
-            int dateStart = message.indexOf("\"date\"") + 8;
-            int dateEnd = message.indexOf("\"", dateStart + 1);
-            if (dateEnd > dateStart) {
-                return message.substring(dateStart + 1, dateEnd);
-            }
+        if (message == null || message.isBlank()) {
+            return null;
         }
-        return null;
+        try {
+            JsonNode json = MAPPER.readTree(message);
+            String dateValue = json.path("date").asText(null);
+            return (dateValue != null && !dateValue.isEmpty()) ? dateValue : null;
+        } catch (Exception e) {
+            log.warn("Failed to parse date from message as JSON: {}. Returning null.", message, e);
+            return null;
+        }
     }
 
     /**
@@ -110,14 +136,12 @@ public class WeatherService {
      * Forecast fields that don't exist in current weather are added.
      * Weather array entries are merged (forecast fields override current).
      */
-    @Transactional
     public String mergeWeatherResponses(String currentJson, String forecastJson) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
             // Deep copy using ObjectMapper round-trip
-            JsonNode currentCopy = mapper.readTree(currentJson);
-            JsonNode merged = mergeJsonNodes(mapper, currentCopy, forecastJson);
-            return mapper.writeValueAsString(merged);
+            JsonNode currentCopy = MAPPER.readTree(currentJson);
+            JsonNode merged = mergeJsonNodes(MAPPER, currentCopy, forecastJson);
+            return MAPPER.writeValueAsString(merged);
         } catch (Exception e) {
             // If merge fails, return original
             return currentJson;
@@ -136,44 +160,26 @@ public class WeatherService {
         return mergeJsonNodes(mapper, current, forecast);
     }
 
-    /**
-     * Extracts "main" from the first weather entry of the current response when it's a string
-     * (e.g., "severe") and adds it as a top-level key in currentMap. This is called BEFORE
-     * merging so the extracted value survives the merge where forecast entries override it.
-     */
-    private void extractWeatherMainAsString(JsonNode current, Map<String, Object> currentMap) {
-        if (current == null || !current.has("weather") || current.get("weather").isEmpty()) {
-            return;
-        }
-        JsonNode weatherArray = current.get("weather");
-        if (weatherArray.isEmpty()) {
-            return;
-        }
-        JsonNode firstWeather = weatherArray.get(0);
-        if (firstWeather != null && firstWeather.has("main")) {
-            JsonNode mainNode = firstWeather.get("main");
-            if (mainNode.isTextual()) {
-                currentMap.put("main", mainNode.asText());
-            }
-        }
-    }
-
     private JsonNode mergeJsonNodes(ObjectMapper mapper, JsonNode current, JsonNode forecast) {
-        // Serialize current to a mutable Map-based tree
-        Map<String, Object> currentMap = jsonNodeToMap(mapper, current);
-        // Extract "main" from the first weather entry of the CURRENT when it's a string
-        // (e.g., "severe") before merge overwrites it with forecast values.
-        extractWeatherMainAsString(current, currentMap);
-        Map<String, Object> forecastMap = jsonNodeToMap(mapper, forecast);
-        mergeMaps(currentMap, forecastMap);
-        return mapper.valueToTree(currentMap);
+        Object currentObj = jsonNodeToMap(mapper, current);
+        if (currentObj instanceof Map) {
+            Map<String, Object> currentMap = (Map<String, Object>) currentObj;
+            Object forecastObj = jsonNodeToMap(mapper, forecast);
+            if (forecastObj instanceof Map) {
+                mergeMaps(currentMap, (Map<String, Object>) forecastObj);
+            }
+            return mapper.valueToTree(currentMap);
+        }
+        // Root is an array or primitive — return original current node
+        return current;
     }
 
     /**
-     * Converts JsonNode to a mutable Map structure for manipulation.
+     * Converts JsonNode to a mutable Map or List structure for manipulation.
+     * Returns Map for object nodes, List for array nodes, or a Map with "value" key for primitives.
      */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> jsonNodeToMap(ObjectMapper mapper, JsonNode node) {
+    private Object jsonNodeToMap(ObjectMapper mapper, JsonNode node) {
         if (node == null || node.isNull()) {
             return null;
         }
@@ -187,7 +193,7 @@ public class WeatherService {
         if (node.isArray()) {
             java.util.List<Object> list = new java.util.ArrayList<>();
             node.forEach(item -> list.add(jsonNodeValue(mapper, item)));
-            return null; // Signal to handle arrays separately
+            return list;
         }
         return Map.of("value", node.asText());
     }
@@ -235,8 +241,10 @@ public class WeatherService {
                 // Recursively merge nested maps
                 // When forecast is a string (e.g., "severe") and current is a Map (e.g., {temp, humidity}),
                 // merge the forecast string into the existing Map so both are preserved.
-                if (forecastValue instanceof String && currentValue instanceof Map<?, ?> currentMap) {
-                    mergeMaps((Map<String, Object>) currentMap, (Map<String, Object>) (Object) Map.of(key, forecastValue));
+                if (forecastValue instanceof String && currentValue instanceof Map<?, ?>) {
+                    // Put the string value directly into the current map under the given key.
+                    // This preserves the forecast string (e.g., "severe") alongside existing map entries.
+                    ((Map<String, Object>) currentValue).put(key, forecastValue);
                 } else if (currentValue instanceof Map<?, ?> currentMap && forecastValue instanceof Map<?, ?> forecastMap) {
                     mergeMaps((Map<String, Object>) currentMap, (Map<String, Object>) forecastMap);
                 }
