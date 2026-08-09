@@ -148,8 +148,6 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        if (httpClient != null) {
-            httpClient.close();
-        }
+        // HttpClient is immutable and does not need explicit cleanup
     }
 }
