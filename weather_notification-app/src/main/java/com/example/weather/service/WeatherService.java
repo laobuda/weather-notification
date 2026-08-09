@@ -35,14 +35,17 @@ public class WeatherService {
     @Transactional
     public String getWeatherByCityAndDate(String cityName, LocalDate date) {
         String dateStr = date.toString();
-        WeatherRequest request = new WeatherRequest();
-        request.setCityName(cityName);
-        request.setRequestedDate(date);
-        request.setRequestPayload(MAPPER.createObjectNode()
+        String requestPayload = MAPPER.createObjectNode()
                 .put("cityName", cityName)
                 .put("date", dateStr)
-                .toString());
-        request.setCreatedAt(LocalDateTime.now());
+                .toString();
+
+        WeatherRequest request = WeatherRequest.builder()
+                .withCityName(cityName)
+                .withRequestedDate(date)
+                .withRequestPayload(requestPayload)
+                .withCreatedAt(LocalDateTime.now())
+                .build();
 
         try {
             String response = apiClient.fetchWeather(cityName, dateStr);

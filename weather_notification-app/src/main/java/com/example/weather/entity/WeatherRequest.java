@@ -35,6 +35,9 @@ public class WeatherRequest {
         SUCCESS, NOT_FOUND, ERROR
     }
 
+    // Private constructor for Builder
+    private WeatherRequest() {}
+
     // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -50,4 +53,61 @@ public class WeatherRequest {
     public void setStatus(Status status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    /**
+     * Builder pattern for creating WeatherRequest instances.
+     */
+    public static class Builder {
+        private String cityName;
+        private LocalDate requestedDate;
+        private String requestPayload;
+        private String responsePayload;
+        private Status status;
+        private LocalDateTime createdAt;
+
+        public Builder withCityName(String cityName) {
+            this.cityName = cityName;
+            return this;
+        }
+
+        public Builder withRequestedDate(LocalDate requestedDate) {
+            this.requestedDate = requestedDate;
+            return this;
+        }
+
+        public Builder withRequestPayload(String requestPayload) {
+            this.requestPayload = requestPayload;
+            return this;
+        }
+
+        public Builder withResponsePayload(String responsePayload) {
+            this.responsePayload = responsePayload;
+            return this;
+        }
+
+        public Builder withStatus(Status status) {
+            this.status = status;
+            return this;
+        }
+
+        public Builder withCreatedAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
+            return this;
+        }
+
+        public WeatherRequest build() {
+            WeatherRequest request = new WeatherRequest();
+            request.cityName = this.cityName;
+            request.requestedDate = this.requestedDate;
+            request.requestPayload = this.requestPayload;
+            request.responsePayload = this.responsePayload;
+            request.status = this.status != null ? this.status : Status.ERROR;
+            request.createdAt = this.createdAt != null ? this.createdAt : LocalDateTime.now();
+            return request;
+        }
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
 }
