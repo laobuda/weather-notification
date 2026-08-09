@@ -14,6 +14,9 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.List;
 
+/**
+ * JMS consumer for weather notification messages.
+ */
 @Component
 public class NotificationConsumer {
 
@@ -26,6 +29,11 @@ public class NotificationConsumer {
         this.repository = repository;
     }
 
+    /**
+     * Listens for messages on the weather.queue and updates request status.
+     *
+     * @param message the JMS message
+     */
     @JmsListener(destination = "weather.queue")
     public void receiveMessage(Message message) throws jakarta.jms.JMSException {
         String textMessage;

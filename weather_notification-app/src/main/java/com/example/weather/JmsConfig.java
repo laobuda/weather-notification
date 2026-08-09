@@ -9,6 +9,9 @@ import org.springframework.jms.core.JmsMessagingTemplate;
 
 import jakarta.jms.ConnectionFactory;
 
+/**
+ * JMS configuration for Apache Artemis message broker.
+ */
 @Configuration
 @EnableJms
 public class JmsConfig {
