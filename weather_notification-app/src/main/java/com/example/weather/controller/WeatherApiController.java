@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 
+/**
+ * REST controller for weather API endpoints.
+ */
 @RestController
 @RequestMapping("/api/weather")
 public class WeatherApiController {
@@ -26,6 +29,13 @@ public class WeatherApiController {
         this.weatherService = weatherService;
     }
 
+    /**
+     * Gets weather data for a city and date.
+     *
+     * @param cityName the city name
+     * @param date the date in yyyy-MM-dd format
+     * @return weather JSON response
+     */
     @GetMapping("/{cityName}/{date}")
     public String getWeather(@PathVariable String cityName, @PathVariable String date) {
         if (cityName == null || cityName.isBlank()) {

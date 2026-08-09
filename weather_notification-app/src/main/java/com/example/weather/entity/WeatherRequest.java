@@ -4,6 +4,9 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+/**
+ * Entity representing a weather API request.
+ */
 @Entity
 @Table(name = "weather_requests")
 public class WeatherRequest {
@@ -38,16 +41,33 @@ public class WeatherRequest {
     // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    
     public String getCityName() { return cityName; }
     public void setCityName(String cityName) { this.cityName = cityName; }
+    
     public LocalDate getRequestedDate() { return requestedDate; }
     public void setRequestedDate(LocalDate requestedDate) { this.requestedDate = requestedDate; }
+    
     public String getRequestPayload() { return requestPayload; }
     public void setRequestPayload(String requestPayload) { this.requestPayload = requestPayload; }
+    
     public String getResponsePayload() { return responsePayload; }
     public void setResponsePayload(String responsePayload) { this.responsePayload = responsePayload; }
+    
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
+    
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    
+    @Override
+    public String toString() {
+        return "WeatherRequest{" +
+                "id=" + id +
+                ", cityName='" + cityName + '\'' +
+                ", requestedDate=" + requestedDate +
+                ", status=" + status +
+                ", createdAt=" + createdAt +
+                '}';
+    }
 }

@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 
+/**
+ * Service for fetching and caching weather data.
+ */
 @Service
 public class WeatherService {
 
@@ -32,6 +35,13 @@ public class WeatherService {
         this.forecastUrl = forecastUrl;
     }
 
+    /**
+     * Fetches weather data for a city and date, persisting the request/response.
+     *
+     * @param cityName the city name
+     * @param date the date
+     * @return the weather response JSON
+     */
     @Transactional
     public String getWeatherByCityAndDate(String cityName, LocalDate date) {
         String dateStr = date.toString();
@@ -76,6 +86,13 @@ public class WeatherService {
         return request.getResponsePayload();
     }
 
+    /**
+     * Public API for fetching weather by city and date string.
+     *
+     * @param cityName the city name
+     * @param date the date in yyyy-MM-dd format
+     * @return the weather response JSON or error message
+     */
     @Transactional
     public String getWeather(String cityName, String date) {
         try {
@@ -88,6 +105,11 @@ public class WeatherService {
         }
     }
 
+    /**
+     * Processes a JMS notification message by fetching weather data.
+     *
+     * @param message the JMS message containing city and date
+     */
     @Transactional
     public void processNotification(String message) {
         // Parse city and date from the JMS message
@@ -135,6 +157,10 @@ public class WeatherService {
      * Merges current weather with forecast data.
      * Forecast fields that don't exist in current weather are added.
      * Weather array entries are merged (forecast fields override current).
+     *
+     * @param currentJson current weather JSON
+     * @param forecastJson forecast weather JSON
+     * @return merged JSON string
      */
     public String mergeWeatherResponses(String currentJson, String forecastJson) {
         try {
@@ -144,6 +170,7 @@ public class WeatherService {
             return MAPPER.writeValueAsString(merged);
         } catch (Exception e) {
             // If merge fails, return original
+            log.debug("Failed to merge weather responses, returning original", e);
             return currentJson;
         }
     }

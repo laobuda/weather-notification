@@ -11,6 +11,9 @@ import java.util.Map;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+/**
+ * Service for processing weather requests and sending notifications for severe weather.
+ */
 @Service
 public class NotificationService {
 
@@ -25,6 +28,12 @@ public class NotificationService {
         this.jmsTemplate = jmsTemplate;
     }
 
+    /**
+     * Processes a weather request for a city and date, sending notifications for severe weather.
+     *
+     * @param cityName the city name
+     * @param date the date
+     */
     public void processWeatherRequest(String cityName, LocalDate date) {
         log.info("Processing weather request for city: {}, date: {}", cityName, date);
 
@@ -42,6 +51,12 @@ public class NotificationService {
         }
     }
 
+    /**
+     * Checks if the weather response indicates severe weather conditions.
+     *
+     * @param response the weather API response JSON
+     * @return true if severe weather is detected
+     */
     private boolean isSevereWeather(String response) {
         if (response == null || response.isEmpty()) {
             return false;
@@ -69,6 +84,14 @@ public class NotificationService {
         return false;
     }
 
+    /**
+     * Builds a notification message from weather response data.
+     *
+     * @param cityName the city name
+     * @param date the date
+     * @param response the weather API response JSON
+     * @return JSON notification message
+     */
     private String buildNotificationMessage(String cityName, LocalDate date, String response) {
         try {
             Map<String, Object> body = (response != null && !response.isEmpty())
@@ -91,6 +114,14 @@ public class NotificationService {
         }
     }
 
+    /**
+     * Builds a JSON message for notification.
+     *
+     * @param cityName the city name
+     * @param date the date
+     * @param severity the weather severity
+     * @return JSON string
+     */
     private String buildJsonMessage(String cityName, LocalDate date, String severity) {
         return MAPPER.createObjectNode()
                 .put("city", cityName)
