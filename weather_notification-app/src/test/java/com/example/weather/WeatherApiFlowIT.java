@@ -149,7 +149,7 @@ public class WeatherApiFlowIT extends AbstractIntegrationTest {
     @AfterEach
     void tearDown() {
         if (httpClient != null) {
-            httpClient.close();
+            httpClient.close()
         }
     }
 }
